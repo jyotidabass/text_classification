@@ -2,7 +2,6 @@
 
 import torch
 from torchtext import data
-from torchtext.vocab import Vectors
 import spacy
 import pandas as pd
 import numpy as np
@@ -40,14 +39,13 @@ class Dataset(object):
         full_df = pd.DataFrame({"text":data_text, "label":data_label})
         return full_df
     
-    def load_data(self, w2v_file, train_file, test_file=None, val_file=None):
+    def load_data(self, train_file, test_file=None, val_file=None):
         '''
         Loads the data from files
         Sets up iterators for training, validation and test data
         Also create vocabulary and word embeddings based on the data
         
         Inputs:
-            w2v_file (String): path to file containing word embeddings (GloVe/Word2Vec)
             train_file (String): path to training file
             test_file (String): path to test file
             val_file (String): path to validation file
@@ -78,9 +76,7 @@ class Dataset(object):
         else:
             train_data, val_data = train_data.split(split_ratio=0.8)
         
-        if w2v_file:
-            TEXT.build_vocab(train_data, vectors=Vectors(w2v_file))
-        self.word_embeddings = TEXT.vocab.vectors
+        TEXT.build_vocab(train_data)
         self.vocab = TEXT.vocab
         
         self.train_iterator = data.BucketIterator(
@@ -100,7 +96,6 @@ class Dataset(object):
         print ("Loaded {} training examples".format(len(train_data)))
         print ("Loaded {} test examples".format(len(test_data)))
         print ("Loaded {} validation examples".format(len(val_data)))
-
 
 def evaluate_model(model, iterator):
     all_preds = []

@@ -1,81 +1,45 @@
-# model.py
+# Model.py
 
 import torch
-from torch import nn
+import torch.nn as nn
+from copy import deepcopy
+from train_utils import Embeddings,PositionalEncoding
+from attention import MultiHeadedAttention
+from encoder import EncoderLayer, Encoder
+from feed_forward import PositionwiseFeedForward
 import numpy as np
-from torch.nn import functional as F
 from utils import *
 
-class Seq2SeqAttention(nn.Module):
-    def __init__(self, config, vocab_size, word_embeddings):
-        super(Seq2SeqAttention, self).__init__()
+class Transformer(nn.Module):
+    def __init__(self, config, src_vocab):
+        super(Transformer, self).__init__()
         self.config = config
         
-        # Embedding Layer
-        self.embeddings = nn.Embedding(vocab_size, self.config.embed_size)
-        self.embeddings.weight = nn.Parameter(word_embeddings, requires_grad=False)
+        h, N, dropout = self.config.h, self.config.N, self.config.dropout
+        d_model, d_ff = self.config.d_model, self.config.d_ff
         
-        # Encoder RNN
-        self.lstm = nn.LSTM(input_size = self.config.embed_size,
-                            hidden_size = self.config.hidden_size,
-                            num_layers = self.config.hidden_layers,
-                            bidirectional = self.config.bidirectional)
+        attn = MultiHeadedAttention(h, d_model)
+        ff = PositionwiseFeedForward(d_model, d_ff, dropout)
+        position = PositionalEncoding(d_model, dropout)
         
-        # Dropout Layer
-        self.dropout = nn.Dropout(self.config.dropout_keep)
-        
+        self.encoder = Encoder(EncoderLayer(config.d_model, deepcopy(attn), deepcopy(ff), dropout), N)
+        self.src_embed = nn.Sequential(Embeddings(config.d_model, src_vocab), deepcopy(position)) #Embeddings followed by PE
+
         # Fully-Connected Layer
         self.fc = nn.Linear(
-            self.config.hidden_size * (1+self.config.bidirectional) * 2,
+            self.config.d_model,
             self.config.output_size
         )
         
         # Softmax non-linearity
         self.softmax = nn.Softmax()
-                
-    def apply_attention(self, rnn_output, final_hidden_state):
-        '''
-        Apply Attention on RNN output
-        
-        Input:
-            rnn_output (batch_size, seq_len, num_directions * hidden_size): tensor representing hidden state for every word in the sentence
-            final_hidden_state (batch_size, num_directions * hidden_size): final hidden state of the RNN
-            
-        Returns:
-            attention_output(batch_size, num_directions * hidden_size): attention output vector for the batch
-        '''
-        hidden_state = final_hidden_state.unsqueeze(2)
-        attention_scores = torch.bmm(rnn_output, hidden_state).squeeze(2)
-        soft_attention_weights = F.softmax(attention_scores, 1).unsqueeze(2) #shape = (batch_size, seq_len, 1)
-        attention_output = torch.bmm(rnn_output.permute(0,2,1), soft_attention_weights).squeeze(2)
-        return attention_output
-        
-    def forward(self, x):
-        # x.shape = (max_sen_len, batch_size)
-        embedded_sent = self.embeddings(x)
-        # embedded_sent.shape = (max_sen_len=20, batch_size=64,embed_size=300)
 
-        ##################################### Encoder #######################################
-        lstm_output, (h_n,c_n) = self.lstm(embedded_sent)
-        # lstm_output.shape = (seq_len, batch_size, num_directions * hidden_size)
+    def forward(self, x):
+        embedded_sents = self.src_embed(x.permute(1,0)) # shape = (batch_size, sen_len, d_model)
+        encoded_sents = self.encoder(embedded_sents)
         
-        # Final hidden state of last layer (num_directions, batch_size, hidden_size)
-        batch_size = h_n.shape[1]
-        h_n_final_layer = h_n.view(self.config.hidden_layers,
-                                   self.config.bidirectional + 1,
-                                   batch_size,
-                                   self.config.hidden_size)[-1,:,:,:]
-        
-        ##################################### Attention #####################################
-        # Convert input to (batch_size, num_directions * hidden_size) for attention
-        final_hidden_state = torch.cat([h_n_final_layer[i,:,:] for i in range(h_n_final_layer.shape[0])], dim=1)
-        
-        attention_out = self.apply_attention(lstm_output.permute(1,0,2), final_hidden_state)
-        # Attention_out.shape = (batch_size, num_directions * hidden_size)
-        
-        #################################### Linear #########################################
-        concatenated_vector = torch.cat([final_hidden_state, attention_out], dim=1)
-        final_feature_map = self.dropout(concatenated_vector) # shape=(batch_size, num_directions * hidden_size)
+        # Convert input to (batch_size, d_model) for linear layer
+        final_feature_map = encoded_sents[:,-1,:]
         final_out = self.fc(final_feature_map)
         return self.softmax(final_out)
     

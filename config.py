@@ -1,13 +1,13 @@
 # config.py
 
 class Config(object):
-    embed_size = 300
-    hidden_layers = 1
-    hidden_size = 32
-    bidirectional = True
+    N = 1 #6 in Transformer Paper
+    d_model = 256 #512 in Transformer Paper
+    d_ff = 512 #2048 in Transformer Paper
+    h = 8
+    dropout = 0.1
     output_size = 4
-    max_epochs = 15
-    lr = 0.5
+    lr = 0.0003
+    max_epochs = 35
     batch_size = 128
-    dropout_keep = 0.8
-    max_sen_len = None # Sequence length for RNN
+    max_sen_len = 60
